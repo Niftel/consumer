@@ -112,8 +112,19 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 	// here would let a duplicate JOB_STARTED regress a reconciler-set 'lost'/'error'
 	// run back to 'running' (those states are intentionally non-terminal so a real
 	// recovering terminal event can win — but a stale duplicate must not).
+	transitioned := false
 	if newlyInserted {
-		if err := w.updateRunState(ctx, tx, evt); err != nil {
+		// Sequence progress is independent of lifecycle state. Task and narration
+		// events advance it even though they do not change state.
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE execution_runs
+			SET last_event_seq = GREATEST(last_event_seq, $1)
+			WHERE id = $2`, evt.Seq, evt.ExecutionRunID); err != nil {
+			return fmt.Errorf("update run event sequence failed: %w", err)
+		}
+
+		transitioned, err = w.updateRunState(ctx, tx, evt)
+		if err != nil {
 			return fmt.Errorf("update run state failed: %w", err)
 		}
 	}
@@ -124,53 +135,39 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 
 	if newlyInserted {
 		EventsProjected.Inc()
-		switch evt.EventType {
-		case "JOB_COMPLETED":
-			TerminalTransitions.WithLabelValues("successful").Inc()
-		case "JOB_FAILED":
-			TerminalTransitions.WithLabelValues("failed").Inc()
-		case "JOB_CANCELED":
-			TerminalTransitions.WithLabelValues("canceled").Inc()
+		if transitioned {
+			if transition, ok := TransitionForEvent(evt.EventType); ok && transition.Terminal {
+				TerminalTransitions.WithLabelValues(transition.RunState).Inc()
+			}
+			w.Notifier.Dispatch(evt) // only an accepted transition has lifecycle side effects
 		}
-		w.Notifier.Dispatch(evt) // no-op on a nil notifier; sends in the background
 	}
 	return nil
 }
 
-func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.JobEvent) error {
-	var newState string
-	var newStatus string // for unified_job
-	finished := false
+func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.JobEvent) (bool, error) {
+	transition, lifecycle := TransitionForEvent(evt.EventType)
+	if !lifecycle {
+		return false, nil
+	}
 
-	switch evt.EventType {
-	case "JOB_STARTED":
-		newState = "running"
-		newStatus = "running"
-	case "JOB_COMPLETED":
-		// JOB_COMPLETED means success: the host-runner inspects ansible-playbook's
-		// exit code and emits JOB_FAILED on any non-zero rc, JOB_COMPLETED only on
-		// rc 0 (cmd/host-runner/runner.go). So no rc re-check is needed here.
-		newState = "successful"
-		newStatus = "successful"
-		finished = true
-	case "JOB_FAILED":
-		newState = "failed"
-		newStatus = "failed"
-		finished = true
-	case "JOB_CANCELED":
-		newState = "canceled"
-		newStatus = "canceled"
-		finished = true
-	default:
-		// Normal task events don't change state
-		return nil
+	// Lock the run so the decision, projection, and lifecycle side effects all
+	// agree even when the reconciler or scheduler is updating the same row.
+	var currentState string
+	if err := tx.GetContext(ctx, &currentState,
+		`SELECT state FROM execution_runs WHERE id = $1 FOR UPDATE`, evt.ExecutionRunID); err != nil {
+		return false, err
+	}
+	newState, accepted := NextRunState(currentState, evt.EventType)
+	if !accepted {
+		return false, nil
 	}
 
 	// Compute the finish timestamp only for terminal events; COALESCE keeps the
 	// earliest started_at / first finished_at across duplicate or replayed
 	// events.
 	var finishedAt interface{}
-	if finished {
+	if transition.Terminal {
 		finishedAt = evt.Timestamp
 	}
 
@@ -189,14 +186,13 @@ func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.J
 		UPDATE execution_runs SET
 			state = $1,
 			started_at = COALESCE(started_at, $2),
-			finished_at = COALESCE($3, finished_at),
-			last_event_seq = GREATEST(last_event_seq, $4)
-		WHERE id = $5
+			finished_at = COALESCE($3, finished_at)
+		WHERE id = $4
 		  AND NOT run_is_terminal(state)`,
-		newState, evt.Timestamp, finishedAt, evt.Seq, evt.ExecutionRunID,
+		newState, evt.Timestamp, finishedAt, evt.ExecutionRunID,
 	); err != nil {
 		logger.Error("update execution_run failed", "run_id", evt.ExecutionRunID, "err", err)
-		return err
+		return false, err
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -206,11 +202,11 @@ func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.J
 			finished_at = COALESCE($3, finished_at)
 		WHERE id = $4
 		  AND NOT job_is_terminal(status)`,
-		newStatus, evt.Timestamp, finishedAt, evt.UnifiedJobID,
+		transition.JobState, evt.Timestamp, finishedAt, evt.UnifiedJobID,
 	); err != nil {
 		logger.Error("update unified_job failed", "job_id", evt.UnifiedJobID, "err", err)
-		return err
+		return false, err
 	}
 
-	return nil
+	return true, nil
 }

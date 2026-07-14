@@ -112,6 +112,30 @@ func TestDBWriterResilience(t *testing.T) {
 		t.Fatalf("monotonicity violated: run regressed from terminal to %q", got)
 	}
 
+	// 4. A conflicting terminal event is retained for diagnosis but cannot replace
+	// the first accepted executor outcome. Its sequence still advances the run's
+	// observed event cursor.
+	conflictingFailure := events.JobEvent{
+		ExecutionRunID: runID,
+		UnifiedJobID:   jobID,
+		Seq:            6,
+		EventType:      "JOB_FAILED",
+		Timestamp:      time.Now(),
+	}
+	if err := writer.WriteEvent(ctx, conflictingFailure); err != nil {
+		t.Fatalf("conflicting terminal write: %v", err)
+	}
+	if got := runState(t, db, runID); got != "successful" {
+		t.Fatalf("conflicting terminal event replaced executor outcome with %q", got)
+	}
+	var lastSeq int64
+	if err := db.Get(&lastSeq, `SELECT last_event_seq FROM execution_runs WHERE id = $1`, runID); err != nil {
+		t.Fatalf("get last_event_seq: %v", err)
+	}
+	if lastSeq != 6 {
+		t.Fatalf("last_event_seq = %d, want 6", lastSeq)
+	}
+
 	var jobStatus string
 	if err := db.Get(&jobStatus, `SELECT status FROM unified_jobs WHERE id = $1`, jobID); err != nil {
 		t.Fatalf("get job status: %v", err)
