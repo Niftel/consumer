@@ -47,6 +47,10 @@ github.com/praetordev/eventbus v0.1.0 h1:LGSQnjmiPZOV7DDEYzIc5yuJ7i0oZe52farzie5
 github.com/praetordev/eventbus v0.1.0/go.mod h1:29XBpJHAGp5JItQo6ad5v4R7bBiF3ub2PZ24To2Gg08=
 github.com/praetordev/events v0.1.0 h1:n4bZW4klXLN6XSFuX7qIaTPDau4/axFo2Zk71G/nGmI=
 github.com/praetordev/events v0.1.0/go.mod h1:gF7ZeKJTxupPc1yPlo8HBhRdzZrRWkBbTEovgba498Y=
+github.com/praetordev/events v0.1.1-0.20260720200102-f46fa9ea6404 h1:6lrBHa5ySPQ8UIZ4jJcEJ52ZZIr1reQspoWzMgzvKGs=
+github.com/praetordev/events v0.1.1-0.20260720200102-f46fa9ea6404/go.mod h1:gF7ZeKJTxupPc1yPlo8HBhRdzZrRWkBbTEovgba498Y=
+github.com/praetordev/events v0.1.1 h1:NT8JD3gr27OmpSIIdmXnV8n4m8wjoRONdjMDrjL0vzw=
+github.com/praetordev/events v0.1.1/go.mod h1:gF7ZeKJTxupPc1yPlo8HBhRdzZrRWkBbTEovgba498Y=
 github.com/praetordev/metrics v0.1.0 h1:P6uRYZOVIsIw6XKjr+cg/mZ7tV9GuOOfcAeL/zJYtlw=
 github.com/praetordev/metrics v0.1.0/go.mod h1:LWAc9ODqqUtnFJpTwmXFkmP47OlyyhYM6WA3ff9dKws=
 github.com/praetordev/notify v0.1.0 h1:YpTErKoNHrO3+XNrQic9lUVwTRjfnOf4iCHpAI5MlQs=

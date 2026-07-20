@@ -81,7 +81,24 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 	// 1. Insert into job_event table
 	// Note: We used int64 for ID in models, but typically events might be inserted with DEFAULT id.
 	// We need to map JobEvent fields to DB columns.
-	eventDataJSON, _ := json.Marshal(evt.EventData)
+	eventData := interface{}(evt.EventData)
+	if evt.Diagnostic != nil {
+		eventData = evt.Diagnostic
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	var hostID interface{}
+	if evt.Host != nil && *evt.Host != "" {
+		var resolvedHostID int64
+		if err := tx.GetContext(ctx, &resolvedHostID, `
+			SELECT h.id
+			FROM unified_jobs uj
+			JOIN job_templates jt ON jt.unified_job_template_id = uj.unified_job_template_id
+			JOIN hosts h ON h.inventory_id = jt.inventory_id
+			WHERE uj.id = $1 AND h.name = $2`, evt.UnifiedJobID, *evt.Host); err == nil {
+			hostID = resolvedHostID
+		}
+	}
 
 	// ON CONFLICT makes the write idempotent: the (execution_run_id, seq) unique
 	// constraint means a redelivered or replayed event is silently skipped
@@ -94,7 +111,7 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (execution_run_id, seq) DO NOTHING`,
 		evt.UnifiedJobID, evt.ExecutionRunID, evt.Seq, evt.EventType,
-		nil, evt.TaskName, evt.PlayName, eventDataJSON, evt.StdoutSnippet, evt.Timestamp,
+		hostID, evt.TaskName, evt.PlayName, eventDataJSON, evt.StdoutSnippet, evt.Timestamp,
 	)
 	if err != nil {
 		return fmt.Errorf("insert job_event failed: %w", err)
@@ -114,6 +131,11 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 	// recovering terminal event can win — but a stale duplicate must not).
 	transitioned := false
 	if newlyInserted {
+		if evt.Diagnostic != nil && hostID != nil && evt.Diagnostic.Outcome != "" {
+			if err := updateHostSummary(ctx, tx, evt, hostID.(int64)); err != nil {
+				return err
+			}
+		}
 		// Sequence progress is independent of lifecycle state. Task and narration
 		// events advance it even though they do not change state.
 		if _, err := tx.ExecContext(ctx, `
@@ -141,6 +163,40 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 			}
 			w.Notifier.Dispatch(evt) // only an accepted transition has lifecycle side effects
 		}
+	}
+	return nil
+}
+
+func updateHostSummary(ctx context.Context, tx *sqlx.Tx, evt events.JobEvent, hostID int64) error {
+	var changed, failed, okCount, skipped, unreachable int
+	switch evt.Diagnostic.Outcome {
+	case "changed":
+		changed = 1
+	case "failed":
+		failed = 1
+	case "ok":
+		okCount = 1
+	case "skipped":
+		skipped = 1
+	case "unreachable":
+		unreachable = 1
+	default:
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO job_host_summaries
+			(unified_job_id, host_id, changed, failed, ok, skipped, unreachable, last_event_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (unified_job_id, host_id) DO UPDATE SET
+			changed = job_host_summaries.changed + EXCLUDED.changed,
+			failed = job_host_summaries.failed + EXCLUDED.failed,
+			ok = job_host_summaries.ok + EXCLUDED.ok,
+			skipped = job_host_summaries.skipped + EXCLUDED.skipped,
+			unreachable = job_host_summaries.unreachable + EXCLUDED.unreachable,
+			last_event_at = GREATEST(job_host_summaries.last_event_at, EXCLUDED.last_event_at)`,
+		evt.UnifiedJobID, hostID, changed, failed, okCount, skipped, unreachable, evt.Timestamp)
+	if err != nil {
+		return fmt.Errorf("update job host summary failed: %w", err)
 	}
 	return nil
 }
