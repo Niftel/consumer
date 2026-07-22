@@ -57,25 +57,42 @@ func (n *Notifier) send(jobID int64, ev, verb string) {
 	defer cancel()
 
 	type row struct {
-		Type    string          `db:"notification_type"`
-		Config  json.RawMessage `db:"config"`
-		JobName string          `db:"name"`
+		Type         string          `db:"notification_type"`
+		Config       json.RawMessage `db:"config"`
+		JobName      string          `db:"name"`
+		ResourceType string          `db:"resource_type"`
 	}
 	var rows []row
 	if err := n.DB.SelectContext(ctx, &rows, `
-		SELECT nt.notification_type, nt.config, uj.name
+		SELECT nt.notification_type, nt.config,
+		       CASE WHEN np.resource_type = 'inventory_source'
+		            THEN org.name || ' / ' || src.name
+		            ELSE uj.name END AS name,
+		       np.resource_type
 		FROM unified_jobs uj
-		JOIN job_templates jt ON jt.unified_job_template_id = uj.unified_job_template_id
-		JOIN job_template_notifications jtn ON jtn.job_template_id = jt.id AND jtn.event = $2
-		JOIN notification_templates nt ON nt.id = jtn.notification_template_id
+		LEFT JOIN job_templates jt ON jt.unified_job_template_id = uj.unified_job_template_id
+		LEFT JOIN inventory_sources src ON src.id = CASE
+		  WHEN jsonb_typeof(uj.job_args->'inventory_source_id') = 'number'
+		  THEN (uj.job_args->>'inventory_source_id')::bigint END
+		LEFT JOIN inventories inv ON inv.id = src.inventory_id
+		LEFT JOIN organizations org ON org.id = inv.organization_id
+		JOIN notification_policies np
+		  ON np.event = $2 AND np.team_id IS NULL
+		 AND ((np.resource_type = 'job_template' AND np.resource_id = jt.id)
+		   OR (np.resource_type = 'inventory_source' AND np.resource_id = src.id))
+		JOIN notification_templates nt ON nt.id = np.notification_template_id
 		WHERE uj.id = $1`, jobID, ev); err != nil {
 		logger.Error("notifier lookup failed", "job_id", jobID, "err", err)
 		return
 	}
 
 	for _, r := range rows {
+		kind := ""
+		if r.ResourceType == "inventory_source" {
+			kind = "inventory sync"
+		}
 		if err := notify.SendOne(ctx, r.Type, r.Config, notify.Message{
-			JobID: jobID, JobName: r.JobName, Event: ev, Status: verb,
+			JobID: jobID, JobName: r.JobName, Event: ev, Status: verb, Kind: kind,
 		}); err != nil {
 			logger.Error("notifier send failed", "type", r.Type, "job_id", jobID, "err", err)
 			continue
