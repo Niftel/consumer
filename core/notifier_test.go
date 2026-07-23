@@ -35,6 +35,24 @@ func TestNotificationMessageKindPreservesJobWireShape(t *testing.T) {
 	}
 }
 
+func TestNotificationVerbDescribesEachDurableEvent(t *testing.T) {
+	tests := map[string]string{
+		"started":  "started",
+		"success":  "succeeded",
+		"error":    "failed",
+		"approval": "needs approval",
+		"approved": "approved",
+		"denied":   "denied",
+		"timeout":  "timed out",
+		"custom":   "custom",
+	}
+	for event, want := range tests {
+		if got := notificationVerb(event); got != want {
+			t.Errorf("notificationVerb(%q)=%q, want %q", event, got, want)
+		}
+	}
+}
+
 func TestClassifyDeliveryOutcomeRedactsUntypedErrors(t *testing.T) {
 	outcome := classifyDeliveryOutcome(errors.New("https://secret.example/path credential=secret"))
 	if !outcome.retryable || outcome.failureCode != "unclassified_failure" ||

@@ -374,8 +374,18 @@ func notificationVerb(event string) string {
 		return "succeeded"
 	case "error":
 		return "failed"
-	default:
+	case "approval":
+		return "needs approval"
+	case "approved":
+		return "approved"
+	case "denied":
+		return "denied"
+	case "timeout":
+		return "timed out"
+	case "started":
 		return "started"
+	default:
+		return event
 	}
 }
 
