@@ -49,8 +49,8 @@ github.com/praetordev/events v0.1.1 h1:NT8JD3gr27OmpSIIdmXnV8n4m8wjoRONdjMDrjL0v
 github.com/praetordev/events v0.1.1/go.mod h1:gF7ZeKJTxupPc1yPlo8HBhRdzZrRWkBbTEovgba498Y=
 github.com/praetordev/metrics v0.1.0 h1:P6uRYZOVIsIw6XKjr+cg/mZ7tV9GuOOfcAeL/zJYtlw=
 github.com/praetordev/metrics v0.1.0/go.mod h1:LWAc9ODqqUtnFJpTwmXFkmP47OlyyhYM6WA3ff9dKws=
-github.com/praetordev/notify v0.1.1-0.20260722200731-355964eafa44 h1:UayxkRaNOyI2C02rQ/hVDdfoSuG6LV4Ad/kKMPs8DsM=
-github.com/praetordev/notify v0.1.1-0.20260722200731-355964eafa44/go.mod h1:v87tYub+HhWUXgUUiKDUZyE5Nc98YwMSDcBJoeT2bCs=
+github.com/praetordev/notify v0.1.1 h1:seumbDx/Hx1uiFSdUZmZvryDycik1lchZrZs6+tcEog=
+github.com/praetordev/notify v0.1.1/go.mod h1:v87tYub+HhWUXgUUiKDUZyE5Nc98YwMSDcBJoeT2bCs=
 github.com/praetordev/plog v0.1.0 h1:SDqOJK8hz86xnzCQ5Tq7TGujE1WeWEnxEq3xqMp+sEc=
 github.com/praetordev/plog v0.1.0/go.mod h1:XNK4wMTvkJIcJ+RtBuNkF538yr2cKowo84Cq1w+WF/8=
 github.com/praetordev/registry v0.1.0 h1:QXFEMLKtkqMmcKaKlKUc5KrOT/l+rm9qoSBju4bG3pQ=

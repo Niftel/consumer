@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 
 	"github.com/praetordev/consumer/core"
@@ -40,6 +41,11 @@ func main() {
 	// 3. Create Consumer (with notification dispatch on lifecycle events)
 	writer := core.NewDBWriter(database)
 	writer.Notifier = core.NewNotifier(database)
+	go func() {
+		if err := writer.Notifier.Run(context.Background()); err != nil {
+			log.Printf("Notification worker stopped: %v", err)
+		}
+	}()
 	consumer := core.NewConsumer(bus, writer)
 
 	// 4. Start

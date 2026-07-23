@@ -151,6 +151,15 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 		}
 	}
 
+	// Enqueue notification work in the same transaction as the accepted state
+	// transition. A crash after commit cannot lose delivery work, and event
+	// redelivery resolves to the same idempotency keys.
+	if transitioned {
+		if err := w.Notifier.Enqueue(ctx, tx, evt); err != nil {
+			return err
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -161,7 +170,6 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 			if transition, ok := TransitionForEvent(evt.EventType); ok && transition.Terminal {
 				TerminalTransitions.WithLabelValues(transition.RunState).Inc()
 			}
-			w.Notifier.Dispatch(evt) // only an accepted transition has lifecycle side effects
 		}
 	}
 	return nil
